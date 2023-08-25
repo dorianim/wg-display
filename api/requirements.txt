@@ -1,0 +1,10 @@
+google-api-python-client 
+google-auth-httplib2 
+google-auth-oauthlib
+fastapi
+pydantic
+pymongo
+python-dotenv
+google-api-python-client
+python-multipart
+uvicorn

@@ -1,0 +1,5 @@
+#define WIFI_SSID "MyWifi"
+#define WIFI_PSK "MySecurePassword"
+#define API_URL "https://api.mydomain.com"
+#define API_TOKEN "my-secure-api-token"
+#define MAX_EVENT_COUNT 4
