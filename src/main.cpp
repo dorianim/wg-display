@@ -23,7 +23,7 @@ char names[4][10] = {"0", "1", "2", "3"};
 // list of counts
 int counts[4] = {0};
 
-TaskHandle_t displayUpdateTaskHandle;
+TaskHandle_t displayUpdateTaskHandle = nullptr;
 
 void updateCountOnDisplay(int button) {
   display.setFont(&FreeMonoBold18pt7b);
@@ -162,7 +162,7 @@ bool runSync(uint64_t &resyncInSeconds) {
   if (!ok) {
     return false;
   }
-  resyncInSeconds += 60 * 60;
+  resyncInSeconds += 60;
 
   drawSleepScreen(events, "", day, month, dayString);
 
@@ -170,7 +170,9 @@ bool runSync(uint64_t &resyncInSeconds) {
 }
 
 void goSleep() {
-  vTaskDelete(displayUpdateTaskHandle);
+  if (displayUpdateTaskHandle != nullptr) {
+    vTaskDelete(displayUpdateTaskHandle);
+  }
 
   // write to eeprom
   EEPROM.put(0, counts);
@@ -182,6 +184,8 @@ void goSleep() {
 
   uint64_t resyncInSeconds;
   bool syncOk = runSync(resyncInSeconds);
+
+  Serial.println("Going to sleep for " + String(resyncInSeconds) + " seconds");
 
   esp_sleep_enable_timer_wakeup(resyncInSeconds * 1000 * 1000);
 
@@ -222,6 +226,8 @@ void updateDisplayTask(void *) {
 void setup() {
   Serial.begin(115200);
 
+  Serial.println("Starting up");
+
   // EEPROM layout:
   // 4*int (counts)
   // 4*char[10] (names)
@@ -245,9 +251,11 @@ void setup() {
   display.setTextColor(GxEPD_BLACK);
 
   if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
+    Serial.println("Woke up from timer");
     goSleep();
   }
 
+  Serial.println("Woke up from button or reset");
   drawCounterScreen();
   xTaskCreate(&updateDisplayTask, "updateDisplay", 5000, NULL, 9,
               &displayUpdateTaskHandle);
