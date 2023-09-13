@@ -41,6 +41,8 @@ googleCredentials = service_account.Credentials.from_service_account_file(SERVIC
 googleSheets = build("sheets", "v4", credentials=googleCredentials).spreadsheets()
 googleCalendar = build("calendar", "v3", credentials=googleCredentials).events()
 
+locale.setlocale(locale.LC_TIME, "de_DE.UTF-8")
+
 @app.get("/")
 def read_root():
     return "MealCount API v1.0.0"
@@ -100,7 +102,13 @@ def message_of_the_day(_: Annotated[str, Depends(tokenScheme)]) -> EventsRespons
 
     for event in events["items"]:
         #print("{}-{}: {}".format(event["start"]["date"], event["end"]["date"] , event["summary"]))
-        eventNames.append(event["summary"])
+        eventName = event["summary"]
+
+        if ":" in eventName:
+            parts = eventName.split(":")
+            eventName = f"{parts[1].strip()}: {parts[0].strip()}"
+
+        eventNames.append(eventName)
 
     now = datetime.datetime.now().astimezone()
     secondsUntilMidnight = (evening - now).seconds

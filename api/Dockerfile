@@ -11,7 +11,14 @@ WORKDIR $APP_HOME
 COPY . ./
 
 # Install production dependencies.
-RUN pip install --no-cache-dir -r requirements.txt
+RUN apt-get update && \
+    apt update && \
+    apt install -y --no-install-recommends locales && \
+    rm -rf /var/lib/apt/lists/* && \
+    sed -i '/^#.* de_DE.UTF-8 /s/^#//' /etc/locale.gen && \
+    locale-gen && \
+    locale -a && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Run the web service on container startup. Here we use the gunicorn
 # webserver, with one worker process and 8 threads.
