@@ -93,8 +93,8 @@ class EventsResponse(BaseModel):
 
 @app.get("/motd")
 def message_of_the_day(_: Annotated[str, Depends(tokenScheme)]) -> EventsResponse:
-    morning = datetime.datetime.now().astimezone().replace(hour=0, minute=0, second=0)
-    evening = datetime.datetime.now().astimezone().replace(hour=23, minute=59, second=59)
+    morning = datetime.datetime.now().astimezone().replace(hour=12, minute=0, second=0)
+    evening = datetime.datetime.now().astimezone().replace(hour=13, minute=0, second=0)
 
     events = googleCalendar.list(calendarId=CALENDAR_ID, singleEvents=True, timeMin=morning.isoformat(), timeMax=evening.isoformat()).execute()
 
