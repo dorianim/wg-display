@@ -111,7 +111,8 @@ def message_of_the_day(_: Annotated[str, Depends(tokenScheme)]) -> EventsRespons
         eventNames.append(eventName)
 
     now = datetime.datetime.now().astimezone()
-    secondsUntilMidnight = (evening - now).seconds
+    midnight = datetime.datetime.now().astimezone().replace(hour=23, minute=59, second=59)
+    secondsUntilMidnight = (midnight - now).seconds
 
     return {
         "events": eventNames,
