@@ -12,6 +12,7 @@
 #include "mealIcon.h"
 #include "rotateIcon.h"
 #include "rotateSlashIcon.h"
+#include "penguinImage.h"
 
 GxEPD2_BW<GxEPD2_270, GxEPD2_270::HEIGHT>
     display(GxEPD2_270(/*CS=5*/ SS, /*DC=*/17, /*RST=*/16,
@@ -25,7 +26,8 @@ int counts[4] = {0};
 
 TaskHandle_t displayUpdateTaskHandle = nullptr;
 
-void updateCountOnDisplay(int button) {
+void updateCountOnDisplay(int button)
+{
   display.setFont(&FreeMonoBold18pt7b);
   display.setPartialWindow(display.width() - 50, display.height() / 4 * button,
                            50, display.height() / 4 - display.height() / 8);
@@ -37,20 +39,23 @@ void updateCountOnDisplay(int button) {
   display.hibernate();
 }
 
-void drawCounterScreen() {
+void drawCounterScreen()
+{
   // write four equally spaced lines on the screen and use relative height
   display.setFont(&FreeMonoBold18pt7b);
   display.setFullWindow();
   display.firstPage();
 
   // print one name per line
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < 4; i++)
+  {
     display.setCursor(0, display.height() / 4 * i + display.height() / 8);
     display.print(names[i]);
   }
 
   // print the counts all aligned to the right
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < 4; i++)
+  {
     display.setCursor(display.width() - 50,
                       display.height() / 4 * i + display.height() / 8);
     display.print(counts[i]);
@@ -60,7 +65,8 @@ void drawCounterScreen() {
 }
 
 void drawSleepScreen(String events[MAX_EVENT_COUNT], String todaysMeal,
-                     uint8_t day, uint8_t month, String dayString) {
+                     uint8_t day, uint8_t month, String dayString)
+{
   display.setFullWindow();
   display.firstPage();
 
@@ -79,9 +85,15 @@ void drawSleepScreen(String events[MAX_EVENT_COUNT], String todaysMeal,
   display.setCursor((display.width() - w) / 2, baseY - h - 15);
   display.print(dayString + ",");
 
-  if (todaysMeal.length() > 17) {
+  if (todaysMeal.length() > 17)
+  {
     todaysMeal = todaysMeal.substring(0, 17);
     todaysMeal += "..";
+  }
+
+  if (events[0].length() == 0)
+  {
+    display.drawBitmap((display.width() - 120) / 2, baseY + 10, PENGUIN_IMAGE, 120, 120, GxEPD_BLACK);
   }
 
   baseY += h / 2 + 20;
@@ -98,7 +110,8 @@ void drawSleepScreen(String events[MAX_EVENT_COUNT], String todaysMeal,
   baseY += h / 2 + 25;
 
   display.setFont(&FreeMonoBold9pt7b);
-  for (int i = 0; i < MAX_EVENT_COUNT; i++) {
+  for (int i = 0; i < MAX_EVENT_COUNT; i++)
+  {
     if (events[i].length() == 0)
       continue;
 
@@ -111,9 +124,11 @@ void drawSleepScreen(String events[MAX_EVENT_COUNT], String todaysMeal,
   display.nextPage();
 }
 
-void writeNamesToEeprom(String newNames[4]) {
+void writeNamesToEeprom(String newNames[4])
+{
   bool namesChanged = false;
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < 4; i++)
+  {
     if (strcmp(newNames[i].c_str(), names[i]) == 0)
       continue;
 
@@ -121,13 +136,15 @@ void writeNamesToEeprom(String newNames[4]) {
     newNames[i].toCharArray(names[i], 10);
   }
 
-  if (namesChanged) {
+  if (namesChanged)
+  {
     EEPROM.put(sizeof(counts), names);
     EEPROM.commit();
   }
 }
 
-void showSyncIcon(bool slash) {
+void showSyncIcon(bool slash)
+{
   display.setPartialWindow((display.width() - 50) / 2,
                            (display.height() - 50) / 2, 50, 50);
   display.firstPage();
@@ -137,19 +154,22 @@ void showSyncIcon(bool slash) {
   display.nextPage();
 }
 
-bool runSync(uint64_t &resyncInSeconds) {
+bool runSync(uint64_t &resyncInSeconds)
+{
   resyncInSeconds = 60;
 
   // send to api
   bool ok = apiHelper::postCounts(counts);
-  if (!ok) {
+  if (!ok)
+  {
     return false;
   }
 
   // get new names
   String newNames[4];
   ok = apiHelper::getNames(newNames);
-  if (!ok) {
+  if (!ok)
+  {
     return false;
   }
   writeNamesToEeprom(newNames);
@@ -159,7 +179,8 @@ bool runSync(uint64_t &resyncInSeconds) {
   uint8_t day, month;
 
   ok = apiHelper::getMotd(events, resyncInSeconds, day, month, dayString);
-  if (!ok) {
+  if (!ok)
+  {
     return false;
   }
   resyncInSeconds += 60;
@@ -169,8 +190,10 @@ bool runSync(uint64_t &resyncInSeconds) {
   return true;
 }
 
-void goSleep() {
-  if (displayUpdateTaskHandle != nullptr) {
+void goSleep()
+{
+  if (displayUpdateTaskHandle != nullptr)
+  {
     vTaskDelete(displayUpdateTaskHandle);
   }
 
@@ -189,7 +212,8 @@ void goSleep() {
 
   esp_sleep_enable_timer_wakeup(resyncInSeconds * 1000 * 1000);
 
-  if (!syncOk) {
+  if (!syncOk)
+  {
     showSyncIcon(true);
   }
 
@@ -203,17 +227,23 @@ void handleButtonLongPress(int buttonIndex) { counts[buttonIndex]--; }
 
 void handleButtonVeryLongPress(int buttonIndex) { counts[buttonIndex] = 0; }
 
-void handleButtonOneAndFourClick(int) {
-  for (int i = 0; i < 4; i++) {
+void handleButtonOneAndFourClick(int)
+{
+  for (int i = 0; i < 4; i++)
+  {
     counts[i] = 0;
   }
 }
 
-void updateDisplayTask(void *) {
+void updateDisplayTask(void *)
+{
   int oldCounts[4] = {0};
-  while (1) {
-    for (int i = 0; i < 4; i++) {
-      if (counts[i] != oldCounts[i]) {
+  while (1)
+  {
+    for (int i = 0; i < 4; i++)
+    {
+      if (counts[i] != oldCounts[i])
+      {
         oldCounts[i] = counts[i];
         updateCountOnDisplay(i);
       }
@@ -223,7 +253,8 @@ void updateDisplayTask(void *) {
   }
 }
 
-void setup() {
+void setup()
+{
   Serial.begin(115200);
 
   Serial.println("Starting up");
@@ -241,16 +272,14 @@ void setup() {
   // read names from eeprom
   EEPROM.get(sizeof(counts), names);
 
-  buttonHelper::init(handleButtonClick, handleButtonLongPress,
-                     handleButtonVeryLongPress, handleButtonOneAndFourClick);
-
   esp_sleep_enable_ext0_wakeup(GPIO_NUM_12, 0);
 
   display.init(115200);
   display.setRotation(1);
   display.setTextColor(GxEPD_BLACK);
 
-  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
+  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER)
+  {
     Serial.println("Woke up from timer");
     goSleep();
   }
@@ -259,10 +288,15 @@ void setup() {
   drawCounterScreen();
   xTaskCreate(&updateDisplayTask, "updateDisplay", 5000, NULL, 9,
               &displayUpdateTaskHandle);
+
+  buttonHelper::init(handleButtonClick, handleButtonLongPress,
+                     handleButtonVeryLongPress, handleButtonOneAndFourClick);
 }
 
-void loop() {
-  if (millis() - buttonHelper::getLastButtonActivity() > 20000) {
+void loop()
+{
+  if (millis() - buttonHelper::getLastButtonActivity() > 20000)
+  {
     goSleep();
   }
 

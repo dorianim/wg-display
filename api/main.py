@@ -45,7 +45,7 @@ locale.setlocale(locale.LC_TIME, "de_DE.UTF-8")
 
 @app.get("/")
 def read_root():
-    return "MealCount API v1.0.0"
+    return "WG-API v1.0.0"
 
 @app.get("/mealcount")
 def read_mealcount(_: Annotated[str, Depends(tokenScheme)]) -> Tuple[int, int, int, int]:
