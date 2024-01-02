@@ -24,6 +24,9 @@ char names[4][10] = {"0", "1", "2", "3"};
 // list of counts
 int counts[4] = {0};
 
+// number of times the sync failed
+uint8_t syncRetryCount;
+
 TaskHandle_t displayUpdateTaskHandle = nullptr;
 
 void updateCountOnDisplay(int button)
@@ -197,10 +200,6 @@ void goSleep()
     vTaskDelete(displayUpdateTaskHandle);
   }
 
-  // write to eeprom
-  EEPROM.put(0, counts);
-  EEPROM.commit();
-
   WiFi.begin(WIFI_SSID, WIFI_PSK);
 
   showSyncIcon(false);
@@ -208,14 +207,30 @@ void goSleep()
   uint64_t resyncInSeconds;
   bool syncOk = runSync(resyncInSeconds);
 
-  Serial.println("Going to sleep for " + String(resyncInSeconds) + " seconds");
+  if (!syncOk)
+  {
+    syncRetryCount++;
+    showSyncIcon(true);
+  }
+  else
+  {
+    syncRetryCount = 0;
+  }
+
+  if (syncRetryCount > 5)
+  {
+    resyncInSeconds = 60 * 60 * 24;
+    syncRetryCount = 0;
+  }
+
+  Serial.println("Going to sleep for " + String(resyncInSeconds) + " seconds (tries: " + String(syncRetryCount) + ")");
 
   esp_sleep_enable_timer_wakeup(resyncInSeconds * 1000 * 1000);
 
-  if (!syncOk)
-  {
-    showSyncIcon(true);
-  }
+  // write to eeprom
+  EEPROM.put(0, counts);
+  EEPROM.put(sizeof(counts) + sizeof(names), syncRetryCount);
+  EEPROM.commit();
 
   display.hibernate();
   esp_deep_sleep_start();
@@ -262,15 +277,28 @@ void setup()
   // EEPROM layout:
   // 4*int (counts)
   // 4*char[10] (names)
+  // 1*uint8_t (retry count)
 
   // begin eeprom
-  EEPROM.begin(sizeof(counts) + sizeof(names));
+  EEPROM.begin(sizeof(counts) + sizeof(names) + sizeof(syncRetryCount));
 
   // read counts from eeprom
   EEPROM.get(0, counts);
 
   // read names from eeprom
   EEPROM.get(sizeof(counts), names);
+
+  // read retry count from eeprom
+  EEPROM.get(sizeof(counts) + sizeof(names), syncRetryCount);
+
+  // dump eeprom as hex
+  Serial.println("EEPROM:");
+  for (int i = 0; i < sizeof(counts) + sizeof(names) + sizeof(syncRetryCount); i++)
+  {
+    Serial.print(EEPROM.read(i), HEX);
+    Serial.print(" ");
+  }
+  Serial.println();
 
   esp_sleep_enable_ext0_wakeup(GPIO_NUM_12, 0);
 
