@@ -23,6 +23,7 @@ char names[4][10] = {"0", "1", "2", "3"};
 
 // list of counts
 int counts[4] = {0};
+int counts_today[4] = {0};
 
 // number of times the sync failed
 uint8_t syncRetryCount;
@@ -31,13 +32,20 @@ TaskHandle_t displayUpdateTaskHandle = nullptr;
 
 void updateCountOnDisplay(int button)
 {
-  display.setFont(&FreeMonoBold18pt7b);
-  display.setPartialWindow(display.width() - 50, display.height() / 4 * button,
-                           50, display.height() / 4 - display.height() / 8);
+  display.setPartialWindow(display.width() - 100, display.height() / 4 * button,
+                           100, display.height() / 4 - display.height() / 8);
   display.firstPage();
+
+  display.setFont(&FreeMonoBold9pt7b);
+  display.setCursor(display.width() - 100,
+                    display.height() / 4 * button + display.height() / 8);
+  display.print(counts_today[button]);
+
+  display.setFont(&FreeMonoBold18pt7b);
   display.setCursor(display.width() - 50,
                     display.height() / 4 * button + display.height() / 8);
   display.print(counts[button]);
+
   display.nextPage();
   display.hibernate();
 }
@@ -45,18 +53,29 @@ void updateCountOnDisplay(int button)
 void drawCounterScreen()
 {
   // write four equally spaced lines on the screen and use relative height
-  display.setFont(&FreeMonoBold18pt7b);
   display.setFullWindow();
   display.firstPage();
 
   // print one name per line
+  display.setFont(&FreeMonoBold18pt7b);
   for (int i = 0; i < 4; i++)
   {
     display.setCursor(0, display.height() / 4 * i + display.height() / 8);
     display.print(names[i]);
   }
 
+  // print todays counts
+  display.setFont(&FreeMonoBold9pt7b);
+  for (int i = 0; i < 4; i++)
+  {
+    display.setFont(&FreeMonoBold9pt7b);
+    display.setCursor(display.width() - 100,
+                      display.height() / 4 * i + display.height() / 8);
+    display.print(counts_today[i]);
+  }
+
   // print the counts all aligned to the right
+  display.setFont(&FreeMonoBold18pt7b);
   for (int i = 0; i < 4; i++)
   {
     display.setCursor(display.width() - 50,
@@ -230,15 +249,24 @@ void goSleep()
   // write to eeprom
   EEPROM.put(0, counts);
   EEPROM.put(sizeof(counts) + sizeof(names), syncRetryCount);
+  EEPROM.put(sizeof(counts) + sizeof(names) + sizeof(syncRetryCount), counts_today);
   EEPROM.commit();
 
   display.hibernate();
   esp_deep_sleep_start();
 }
 
-void handleButtonClick(int buttonIndex) { counts[buttonIndex]++; }
+void handleButtonClick(int buttonIndex)
+{
+  counts_today[buttonIndex]++;
+  counts[buttonIndex]++;
+}
 
-void handleButtonLongPress(int buttonIndex) { counts[buttonIndex]--; }
+void handleButtonLongPress(int buttonIndex)
+{
+  counts_today[buttonIndex]--;
+  counts[buttonIndex]--;
+}
 
 void handleButtonVeryLongPress(int buttonIndex) { counts[buttonIndex] = 0; }
 
@@ -253,6 +281,11 @@ void handleButtonOneAndFourClick(int)
 void updateDisplayTask(void *)
 {
   int oldCounts[4] = {0};
+  for (int i = 0; i < 4; i++)
+  {
+    oldCounts[i] = counts[i];
+  }
+
   while (1)
   {
     for (int i = 0; i < 4; i++)
@@ -278,9 +311,10 @@ void setup()
   // 4*int (counts)
   // 4*char[10] (names)
   // 1*uint8_t (retry count)
+  // 4*int (todays counts)
 
   // begin eeprom
-  EEPROM.begin(sizeof(counts) + sizeof(names) + sizeof(syncRetryCount));
+  EEPROM.begin(sizeof(counts) + sizeof(names) + sizeof(syncRetryCount) + sizeof(counts_today));
 
   // read counts from eeprom
   EEPROM.get(0, counts);
@@ -291,9 +325,12 @@ void setup()
   // read retry count from eeprom
   EEPROM.get(sizeof(counts) + sizeof(names), syncRetryCount);
 
+  // read todays counts from eeprom
+  EEPROM.get(sizeof(counts) + sizeof(names) + sizeof(syncRetryCount), counts_today);
+
   // dump eeprom as hex
   Serial.println("EEPROM:");
-  for (int i = 0; i < sizeof(counts) + sizeof(names) + sizeof(syncRetryCount); i++)
+  for (int i = 0; i < sizeof(counts) + sizeof(names) + sizeof(syncRetryCount) + sizeof(counts_today); i++)
   {
     Serial.print(EEPROM.read(i), HEX);
     Serial.print(" ");
@@ -308,7 +345,14 @@ void setup()
 
   if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER)
   {
-    Serial.println("Woke up from timer");
+    Serial.println("Woke up from timer, sync retry count: " + String(syncRetryCount));
+
+    // only reset if syncRetryCount is 0, because otherwise this may not be a midnight wakeup
+    // but a retry wakeup, and we dont want to reset the counts in that case
+    if (syncRetryCount == 0)
+      for (int i = 0; i < 4; i++)
+        counts_today[i] = 0;
+
     goSleep();
   }
 
