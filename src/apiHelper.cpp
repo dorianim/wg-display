@@ -55,48 +55,7 @@ bool postCounts(int counts[4]) {
   return response == 200;
 }
 
-bool getNames(String names[4]) {
-  if (!isOnline())
-    return false;
-
-  HTTPClient httpClient;
-
-  String url = String(apiUrl) + "/mealcount/names";
-  httpClient.setTimeout(30000);
-  httpClient.begin(url);
-
-  httpClient.addHeader("Accept", "application/json");
-  httpClient.addHeader("Authorization", apiToken);
-
-  int response = httpClient.GET();
-
-  Serial.println("GET " + url + " " + response);
-  String responsePayload = httpClient.getString();
-  Serial.println(responsePayload);
-
-  httpClient.end();
-
-  if (response != 200) {
-    return false;
-  }
-
-  StaticJsonDocument<256> doc;
-  DeserializationError error = deserializeJson(doc, responsePayload);
-
-  if (error) {
-    Serial.print("deserializeJson() failed: ");
-    Serial.println(error.c_str());
-    return false;
-  }
-
-  for (int i = 0; i < 4; i++) {
-    names[i] = doc[i].as<String>();
-  }
-
-  return true;
-}
-
-bool getMotd(String events[MAX_EVENT_COUNT], uint64_t &secondsUntilMidnight,
+bool getMotd(String events[MAX_EVENT_COUNT], String mealcountNames[4], String &mealPlannedToday, uint64_t &secondsUntilMidnight,
              uint8_t &day, uint8_t &month, String &dayString) {
   if (!isOnline())
     return false;
@@ -105,6 +64,7 @@ bool getMotd(String events[MAX_EVENT_COUNT], uint64_t &secondsUntilMidnight,
 
   String url = String(apiUrl) + "/motd";
   httpClient.begin(url);
+  httpClient.setTimeout(30000);
 
   httpClient.addHeader("Accept", "application/json");
   httpClient.addHeader("Authorization", apiToken);
@@ -133,6 +93,12 @@ bool getMotd(String events[MAX_EVENT_COUNT], uint64_t &secondsUntilMidnight,
     events[i] = eventsArray[i].as<String>();
   }
 
+  JsonArray namesArray = doc["mealcountNames"];
+  for (int i = 0; i < namesArray.size(); i++) {
+    mealcountNames[i] = namesArray[i].as<String>();
+  }
+
+  mealPlannedToday = doc["mealPlannedToday"].isNull() ? "" : doc["mealPlannedToday"].as<String>();
   secondsUntilMidnight = doc["secondsUntilMidnight"].as<uint64_t>();
   day = doc["day"].as<uint8_t>();
   month = doc["month"].as<uint8_t>();

@@ -86,7 +86,7 @@ void drawCounterScreen()
   display.nextPage();
 }
 
-void drawSleepScreen(String events[MAX_EVENT_COUNT], String todaysMeal,
+void drawSleepScreen(String events[MAX_EVENT_COUNT], String mealPlannedToday,
                      uint8_t day, uint8_t month, String dayString)
 {
   display.setFullWindow();
@@ -107,10 +107,10 @@ void drawSleepScreen(String events[MAX_EVENT_COUNT], String todaysMeal,
   display.setCursor((display.width() - w) / 2, baseY - h - 15);
   display.print(dayString + ",");
 
-  if (todaysMeal.length() > 17)
+  if (mealPlannedToday.length() > 17)
   {
-    todaysMeal = todaysMeal.substring(0, 17);
-    todaysMeal += "..";
+    mealPlannedToday = mealPlannedToday.substring(0, 17);
+    mealPlannedToday += "..";
   }
 
   if (events[0].length() == 0)
@@ -120,14 +120,16 @@ void drawSleepScreen(String events[MAX_EVENT_COUNT], String todaysMeal,
 
   baseY += h / 2 + 20;
 
-  /*display.getTextBounds(todaysMeal, 0, 0, &x, &y, &w, &h);
-  int todaysMealX = (display.width() - (w + 17 + 5)) / 2;
+  if (mealPlannedToday.length() > 0) {
+    display.getTextBounds(mealPlannedToday, 0, 0, &x, &y, &w, &h);
+    int todaysMealX = (display.width() - (w + 17 + 5)) / 2;
 
-  display.drawBitmap(todaysMealX, baseY - (h / 2) - 4, MEAL_ICON, 17, 17,
-                     GxEPD_BLACK);
-  display.setCursor(todaysMealX + 17 + 5, baseY);
+    display.drawBitmap(todaysMealX, baseY - (h / 2) - (17 / 2), MEAL_ICON, 17, 17,
+                      GxEPD_BLACK);
+    display.setCursor(todaysMealX + 17 + 5, baseY);
 
-  display.print(todaysMeal);*/
+    display.print(mealPlannedToday);
+  }
 
   baseY += h / 2 + 25;
 
@@ -187,27 +189,19 @@ bool runSync(uint64_t &resyncInSeconds)
     return false;
   }
 
-  // get new names
-  String newNames[4];
-  ok = apiHelper::getNames(newNames);
-  if (!ok)
-  {
-    return false;
-  }
-  writeNamesToEeprom(newNames);
-
   // get motd
-  String events[5], dayString;
+  String events[5],mealcountNames[4], mealPlannedToday, dayString;
   uint8_t day, month;
 
-  ok = apiHelper::getMotd(events, resyncInSeconds, day, month, dayString);
+  ok = apiHelper::getMotd(events, mealcountNames, mealPlannedToday, resyncInSeconds, day, month, dayString);
   if (!ok)
   {
     return false;
   }
   resyncInSeconds += 60;
 
-  drawSleepScreen(events, "", day, month, dayString);
+  writeNamesToEeprom(mealcountNames);
+  drawSleepScreen(events, mealPlannedToday, day, month, dayString);
 
   return true;
 }
