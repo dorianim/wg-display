@@ -1,4 +1,4 @@
-import datetime, os, uvicorn, locale, arrow, ics
+import datetime, os, uvicorn, locale, ics, requests
 from fastapi import FastAPI, HTTPException, Depends, Request, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
@@ -21,6 +21,7 @@ CALENDAR_ID = os.environ["CALENDAR_ID"]
 SERVICE_ACCOUNT_FILE = "secrets/service.json"
 
 AUTHORIZATION_TOKEN = os.environ["AUTHORIZATION_TOKEN"]
+TOBIS_KOCHBUCH_URL = os.environ.get("TOBIS_KOCHBUCH_URL", None)
 
 
 class TokenAuthenticationScheme(HTTPBearer):
@@ -62,7 +63,7 @@ def read_root():
 
 @app.get("/mealcount")
 def read_mealcount(
-    _: Annotated[str, Depends(tokenScheme)]
+    _: Annotated[str, Depends(tokenScheme)],
 ) -> Tuple[int, int, int, int]:
     result = (
         googleSheets.values().get(spreadsheetId=SPREADSHEET_ID, range="C3:F3").execute()
@@ -71,18 +72,20 @@ def read_mealcount(
     return (int(values[0][0]), int(values[0][1]), int(values[0][2]), int(values[0][3]))
 
 
+def get_mealcount_names() -> Tuple[str, str, str, str]:
+    result = (
+        googleSheets.values().get(spreadsheetId=SPREADSHEET_ID, range="C2:F2").execute()
+    )
+    values = result.get("values", [])
+    return (values[0][0], values[0][1], values[0][2], values[0][3])
+
+
 @app.get("/mealcount/names")
 def read_mealcount_names(
-    _: Annotated[str, Depends(tokenScheme)]
+    _: Annotated[str, Depends(tokenScheme)],
 ) -> Tuple[str, str, str, str]:
     try:
-        result = (
-            googleSheets.values()
-            .get(spreadsheetId=SPREADSHEET_ID, range="C2:F2")
-            .execute()
-        )
-        values = result.get("values", [])
-        return (values[0][0], values[0][1], values[0][2], values[0][3])
+        return get_mealcount_names()
     except HttpError as e:
         raise HTTPException(status_code=400, detail="Error")
 
@@ -94,7 +97,7 @@ def update_mealcount(
     print("Request: ", to_insert)
 
     try:
-        (p1, p2, p3, p4) = to_insert
+        p1, p2, p3, p4 = to_insert
     except:
         raise HTTPException(status_code=400, detail="Invalid request")
 
@@ -111,9 +114,8 @@ def update_mealcount(
         raise HTTPException(status_code=500, detail="Internal server Error")
 
 
-# def events_ical(_: Annotated[str, Depends(tokenScheme)]):
 @app.get("/events/reminder.ics")
-def events_ical() -> str:
+def events_ical(_: Annotated[str, Depends(tokenScheme)]) -> str:
     morning = datetime.datetime.now().astimezone() - datetime.timedelta(days=3)
     evening = datetime.datetime.now().astimezone() + datetime.timedelta(days=3)
 
@@ -163,14 +165,15 @@ def events_ical() -> str:
 
 class EventsResponse(BaseModel):
     events: List[str]
+    mealcountNames: Tuple[str, str, str, str]
+    mealPlannedToday: str | None
     secondsUntilMidnight: int
     day: int
     month: int
     dayString: str
 
 
-@app.get("/motd")
-def message_of_the_day(_: Annotated[str, Depends(tokenScheme)]) -> EventsResponse:
+def get_event_names() -> List[str]:
     morning = datetime.datetime.now().astimezone().replace(hour=12, minute=0, second=0)
     evening = datetime.datetime.now().astimezone().replace(hour=13, minute=0, second=0)
 
@@ -193,6 +196,30 @@ def message_of_the_day(_: Annotated[str, Depends(tokenScheme)]) -> EventsRespons
 
         eventNames.append(eventName)
 
+    return eventNames
+
+
+def get_meal_planned_today() -> str | None:
+    if TOBIS_KOCHBUCH_URL is None:
+        return None
+
+    plannedTodayResponse = requests.get(
+        f"{TOBIS_KOCHBUCH_URL}/recipe/planned-today",
+        headers={"x-forwarded-roles": "group:WG-Gang2"},
+        timeout=5,
+    )
+    if plannedTodayResponse.status_code != 200:
+        return None
+
+    return plannedTodayResponse.json().get("title", None)
+
+
+@app.get("/motd")
+def message_of_the_day(_: Annotated[str, Depends(tokenScheme)]) -> EventsResponse:
+    eventNames = get_event_names()
+    mealcountNames = get_mealcount_names()
+    mealPlannedToday = get_meal_planned_today()
+
     now = datetime.datetime.now().astimezone()
     midnight = (
         datetime.datetime.now().astimezone().replace(hour=23, minute=59, second=59)
@@ -201,6 +228,8 @@ def message_of_the_day(_: Annotated[str, Depends(tokenScheme)]) -> EventsRespons
 
     return {
         "events": eventNames,
+        "mealcountNames": mealcountNames,
+        "mealPlannedToday": mealPlannedToday,
         "day": now.day,
         "month": now.month,
         "dayString": now.strftime("%A"),
