@@ -18,7 +18,7 @@ SCOPES = [
 ]
 SPREADSHEET_ID = os.environ["SPREADSHEET_ID"]
 CALENDAR_ID = os.environ["CALENDAR_ID"]
-SERVICE_ACCOUNT_FILE = "secrets/service.json"
+SERVICE_ACCOUNT_FILE = os.environ.get("SERVICE_ACCOUNT_FILE", "secrets/service.json")
 
 AUTHORIZATION_TOKEN = os.environ["AUTHORIZATION_TOKEN"]
 TOBIS_KOCHBUCH_URL = os.environ.get("TOBIS_KOCHBUCH_URL", None)
