@@ -1,8 +1,8 @@
 #include <Arduino.h>
 #include <EEPROM.h>
-#include <Fonts/FreeMonoBold18pt7b.h>
-#include <Fonts/FreeMonoBold9pt7b.h>
 #include <GxEPD2_BW.h>
+#include <FreeMonoBold18pt8b.h>
+#include <FreeMonoBold9pt8b.h>
 #include <WiFi.h>
 
 #include "../config.h"
@@ -30,24 +30,40 @@ uint8_t syncRetryCount;
 
 TaskHandle_t displayUpdateTaskHandle = nullptr;
 
+#define FONT_9PT FreeMono_Bold9pt8b
+#define FONT_18PT FreeMono_Bold18pt8b
+
 void updateCountOnDisplay(int button)
 {
   display.setPartialWindow(display.width() - 100, display.height() / 4 * button,
                            100, display.height() / 4 - display.height() / 8);
   display.firstPage();
 
-  display.setFont(&FreeMonoBold9pt7b);
+  display.setFont(&FONT_9PT);
   display.setCursor(display.width() - 100,
                     display.height() / 4 * button + display.height() / 8);
   display.print(counts_today[button]);
 
-  display.setFont(&FreeMonoBold18pt7b);
+  display.setFont(&FONT_18PT);
   display.setCursor(display.width() - 50,
                     display.height() / 4 * button + display.height() / 8);
   display.print(counts[button]);
 
   display.nextPage();
   display.hibernate();
+}
+
+String fixUmlauts(String str)
+{
+  // replace according to Latin-1
+  str.replace("Ä", "\xC4");
+  str.replace("Ö", "\xD6");
+  str.replace("Ü", "\xDC");
+  str.replace("ä", "\xE4");
+  str.replace("ö", "\xF6");
+  str.replace("ü", "\xFC");
+  str.replace("ß", "\xDF");
+  return str;
 }
 
 void drawCounterScreen()
@@ -57,25 +73,25 @@ void drawCounterScreen()
   display.firstPage();
 
   // print one name per line
-  display.setFont(&FreeMonoBold18pt7b);
+  display.setFont(&FONT_18PT);
   for (int i = 0; i < 4; i++)
   {
     display.setCursor(0, display.height() / 4 * i + display.height() / 8);
-    display.print(names[i]);
+    display.print(fixUmlauts(names[i]));
   }
 
   // print todays counts
-  display.setFont(&FreeMonoBold9pt7b);
+  display.setFont(&FONT_9PT);
   for (int i = 0; i < 4; i++)
   {
-    display.setFont(&FreeMonoBold9pt7b);
+    display.setFont(&FONT_9PT);
     display.setCursor(display.width() - 100,
                       display.height() / 4 * i + display.height() / 8);
     display.print(counts_today[i]);
   }
 
   // print the counts all aligned to the right
-  display.setFont(&FreeMonoBold18pt7b);
+  display.setFont(&FONT_18PT);
   for (int i = 0; i < 4; i++)
   {
     display.setCursor(display.width() - 50,
@@ -95,21 +111,22 @@ void drawSleepScreen(String events[MAX_EVENT_COUNT], String mealPlannedToday,
   int16_t x, y;
   uint16_t w, h;
 
-  display.setFont(&FreeMonoBold18pt7b);
+  display.setFont(&FONT_18PT);
 
   display.getTextBounds("01.01.", 0, 0, &x, &y, &w, &h);
   uint16_t baseY = 30 + h;
   display.setCursor((display.width() - w) / 2, baseY);
   display.printf("%02d.%02d.", day, month);
 
-  display.setFont(&FreeMonoBold9pt7b);
+  display.setFont(&FONT_9PT);
   display.getTextBounds(dayString + ",", 0, 0, &x, &y, &w, &h);
   display.setCursor((display.width() - w) / 2, baseY - h - 15);
   display.print(dayString + ",");
 
-  if (mealPlannedToday.length() > 17)
+  mealPlannedToday = fixUmlauts(mealPlannedToday);
+  if (mealPlannedToday.length() > 22)
   {
-    mealPlannedToday = mealPlannedToday.substring(0, 17);
+    mealPlannedToday = mealPlannedToday.substring(0, 20);
     mealPlannedToday += "..";
   }
 
@@ -133,7 +150,7 @@ void drawSleepScreen(String events[MAX_EVENT_COUNT], String mealPlannedToday,
 
   baseY += h / 2 + 25;
 
-  display.setFont(&FreeMonoBold9pt7b);
+  display.setFont(&FONT_9PT);
   for (int i = 0; i < MAX_EVENT_COUNT; i++)
   {
     if (events[i].length() == 0)
@@ -141,7 +158,7 @@ void drawSleepScreen(String events[MAX_EVENT_COUNT], String mealPlannedToday,
 
     display.setCursor(0, baseY);
     display.print("| ");
-    display.print(events[i]);
+    display.print(fixUmlauts(events[i]));
     baseY += 9 + 10;
   }
 
