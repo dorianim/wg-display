@@ -53,17 +53,50 @@ void updateCountOnDisplay(int button)
   display.hibernate();
 }
 
-String fixUmlauts(String str)
-{
-  // replace according to Latin-1
-  str.replace("Ä", "\xC4");
-  str.replace("Ö", "\xD6");
-  str.replace("Ü", "\xDC");
-  str.replace("ä", "\xE4");
-  str.replace("ö", "\xF6");
-  str.replace("ü", "\xFC");
-  str.replace("ß", "\xDF");
-  return str;
+String utf8ToLatin1(const String &in) {
+  String out;
+  out.reserve(in.length());
+
+  const uint8_t *s = (const uint8_t *)in.c_str();
+
+  while (*s) {
+    uint8_t c = *s++;
+
+    // Plain ASCII: unchanged
+    if (c < 0x80) {
+      out += (char)c;
+    }
+
+    // UTF-8 for Latin-1 range U+0080..U+00FF
+    else if (c == 0xC2 || c == 0xC3) {
+      uint8_t c2 = *s++;
+
+      if ((c2 & 0xC0) == 0x80) {
+        uint8_t latin1 = (c == 0xC2) ? c2 : (c2 + 0x40);
+        out += (char)latin1;
+      } else {
+        out += '?';
+      }
+    }
+
+    // Optional: map curly apostrophe ’ to normal apostrophe '
+    else if (c == 0xE2 && s[0] == 0x80 && s[1] == 0x99) {
+      s += 2;
+      out += '\'';
+    }
+
+    // Anything not representable in Latin-1
+    else {
+      out += '?';
+
+      // Skip UTF-8 continuation bytes, if any
+      while ((*s & 0xC0) == 0x80) {
+        s++;
+      }
+    }
+  }
+
+  return out;
 }
 
 void drawCounterScreen()
@@ -77,7 +110,7 @@ void drawCounterScreen()
   for (int i = 0; i < 4; i++)
   {
     display.setCursor(0, display.height() / 4 * i + display.height() / 8);
-    display.print(fixUmlauts(names[i]));
+    display.print(utf8ToLatin1(names[i]));
   }
 
   // print todays counts
@@ -123,7 +156,7 @@ void drawSleepScreen(String events[MAX_EVENT_COUNT], String mealPlannedToday,
   display.setCursor((display.width() - w) / 2, baseY - h - 15);
   display.print(dayString + ",");
 
-  mealPlannedToday = fixUmlauts(mealPlannedToday);
+  mealPlannedToday = utf8ToLatin1(mealPlannedToday);
   if (mealPlannedToday.length() > 22)
   {
     mealPlannedToday = mealPlannedToday.substring(0, 20);
@@ -158,7 +191,7 @@ void drawSleepScreen(String events[MAX_EVENT_COUNT], String mealPlannedToday,
 
     display.setCursor(0, baseY);
     display.print("| ");
-    display.print(fixUmlauts(events[i]));
+    display.print(utf8ToLatin1(events[i]));
     baseY += 9 + 10;
   }
 
