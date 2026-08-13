@@ -22,6 +22,8 @@ SERVICE_ACCOUNT_FILE = os.environ.get("SERVICE_ACCOUNT_FILE", "secrets/service.j
 
 AUTHORIZATION_TOKEN = os.environ["AUTHORIZATION_TOKEN"]
 TOBIS_KOCHBUCH_URL = os.environ.get("TOBIS_KOCHBUCH_URL", None)
+SHOPPING_LIST_URL = os.environ.get("SHOPPING_LIST_URL", None)
+SHOPPING_LIST_GROUP = os.environ.get("SHOPPING_LIST_GROUP", None)
 
 
 class TokenAuthenticationScheme(HTTPBearer):
@@ -108,10 +110,49 @@ def update_mealcount(
             valueInputOption="USER_ENTERED",
             body={"values": [[p1, p2, p3, p4]]},
         ).execute()
-
-        return
     except HttpError as e:
         raise HTTPException(status_code=500, detail="Internal server Error")
+
+    push_mealcount_to_shopping_list(to_insert)
+
+
+# Mirror the counters to the WG shopping list, which shows them as fund balances.
+# The sheet stays the source of truth, so a failure here is logged and not raised:
+# the counts are already stored, and the display would only retry the write above.
+# The list's webhook is configured with AUTHORIZATION_TOKEN, so this needs no
+# second secret: one URL switches the mirroring on.
+def push_mealcount_to_shopping_list(counts: Tuple[int, int, int, int]):
+    if SHOPPING_LIST_URL is None:
+        return
+
+    try:
+        names = get_mealcount_names()
+    except HttpError as e:
+        print("Failed to read mealcount names: ", e)
+        return
+
+    # The whole set goes in one request: over there each person's share is
+    # computed against the household's total, so a partial update would show
+    # everyone the wrong balance until the rest arrived.
+    body = {
+        "counts": [{"user": name, "count": count} for name, count in zip(names, counts)]
+    }
+    if SHOPPING_LIST_GROUP is not None:
+        body["group"] = SHOPPING_LIST_GROUP
+
+    try:
+        response = requests.post(
+            f"{SHOPPING_LIST_URL}/api/meals",
+            json=body,
+            headers={"Authorization": f"Bearer {AUTHORIZATION_TOKEN}"},
+            timeout=5,
+        )
+    except requests.RequestException as e:
+        print("Failed to reach the shopping list: ", e)
+        return
+
+    if response.status_code != 200:
+        print("Shopping list rejected the mealcount: ", response.status_code)
 
 
 @app.get("/events/reminder.ics")
