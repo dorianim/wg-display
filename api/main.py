@@ -23,6 +23,7 @@ SERVICE_ACCOUNT_FILE = os.environ.get("SERVICE_ACCOUNT_FILE", "secrets/service.j
 AUTHORIZATION_TOKEN = os.environ["AUTHORIZATION_TOKEN"]
 TOBIS_KOCHBUCH_URL = os.environ.get("TOBIS_KOCHBUCH_URL", None)
 SHOPPING_LIST_URL = os.environ.get("SHOPPING_LIST_URL", None)
+SHOPPING_LIST_TOKEN = os.environ.get("SHOPPING_LIST_TOKEN", None)
 SHOPPING_LIST_GROUP = os.environ.get("SHOPPING_LIST_GROUP", None)
 
 
@@ -115,8 +116,9 @@ def update_mealcount(
 
     push_mealcount_to_shopping_list(to_insert)
 
+
 def push_mealcount_to_shopping_list(counts: Tuple[int, int, int, int]):
-    if SHOPPING_LIST_URL is None:
+    if SHOPPING_LIST_URL is None or SHOPPING_LIST_TOKEN is None:
         return
 
     try:
@@ -135,7 +137,7 @@ def push_mealcount_to_shopping_list(counts: Tuple[int, int, int, int]):
         response = requests.post(
             f"{SHOPPING_LIST_URL}/api/meals",
             json=body,
-            headers={"Authorization": f"Bearer {AUTHORIZATION_TOKEN}"},
+            headers={"Authorization": f"Bearer {SHOPPING_LIST_TOKEN}"},
             timeout=5,
         )
     except requests.RequestException as e:
