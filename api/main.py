@@ -22,6 +22,9 @@ SERVICE_ACCOUNT_FILE = os.environ.get("SERVICE_ACCOUNT_FILE", "secrets/service.j
 
 AUTHORIZATION_TOKEN = os.environ["AUTHORIZATION_TOKEN"]
 TOBIS_KOCHBUCH_URL = os.environ.get("TOBIS_KOCHBUCH_URL", None)
+SHOPPING_LIST_URL = os.environ.get("SHOPPING_LIST_URL", None)
+SHOPPING_LIST_TOKEN = os.environ.get("SHOPPING_LIST_TOKEN", None)
+SHOPPING_LIST_GROUP = os.environ.get("SHOPPING_LIST_GROUP", None)
 
 
 class TokenAuthenticationScheme(HTTPBearer):
@@ -108,10 +111,41 @@ def update_mealcount(
             valueInputOption="USER_ENTERED",
             body={"values": [[p1, p2, p3, p4]]},
         ).execute()
-
-        return
     except HttpError as e:
         raise HTTPException(status_code=500, detail="Internal server Error")
+
+    push_mealcount_to_shopping_list(to_insert)
+
+
+def push_mealcount_to_shopping_list(counts: Tuple[int, int, int, int]):
+    if SHOPPING_LIST_URL is None or SHOPPING_LIST_TOKEN is None:
+        return
+
+    try:
+        names = get_mealcount_names()
+    except HttpError as e:
+        print("Failed to read mealcount names: ", e)
+        return
+
+    body = {
+        "counts": [{"user": name, "count": count} for name, count in zip(names, counts)]
+    }
+    if SHOPPING_LIST_GROUP is not None:
+        body["group"] = SHOPPING_LIST_GROUP
+
+    try:
+        response = requests.post(
+            f"{SHOPPING_LIST_URL}/api/meals",
+            json=body,
+            headers={"Authorization": f"Bearer {SHOPPING_LIST_TOKEN}"},
+            timeout=5,
+        )
+    except requests.RequestException as e:
+        print("Failed to reach the shopping list: ", e)
+        return
+
+    if response.status_code != 200:
+        print("Shopping list rejected the mealcount: ", response.status_code)
 
 
 @app.get("/events/reminder.ics")
