@@ -91,8 +91,11 @@ def get_mealcount_names_google_sheets() -> Tuple[str, str, str, str]:
     return (values[0][0], values[0][1], values[0][2], values[0][3])
 
 
-def get_mealcount_names() -> Tuple[str, str, str, str]:
-    _, members = get_group_name_and_members_from_keycloak()
+def get_mealcount_names(
+    members: List[Tuple[str, str, int]] | None = None,
+) -> Tuple[str, str, str, str]:
+    if members is None:
+        _, members = get_group_name_and_members_from_keycloak()
     members_tuple = get_group_members_in_tuple(members)
     return (
         members_tuple[0][1],
@@ -339,13 +342,13 @@ def get_event_names() -> List[str]:
     return eventNames
 
 
-def get_meal_planned_today() -> str | None:
+def get_meal_planned_today(group_name: str) -> str | None:
     if TOBIS_KOCHBUCH_URL is None:
         return None
 
     plannedTodayResponse = requests.get(
         f"{TOBIS_KOCHBUCH_URL}/recipe/planned-today",
-        headers={"x-forwarded-roles": "group:WG-Gang2"},
+        headers={"x-forwarded-roles": f"group:{group_name}"},
         timeout=5,
     )
     if plannedTodayResponse.status_code != 200:
@@ -357,8 +360,9 @@ def get_meal_planned_today() -> str | None:
 @app.get("/motd")
 def message_of_the_day(_: Annotated[str, Depends(tokenScheme)]) -> EventsResponse:
     eventNames = get_event_names()
-    mealcountNames = get_mealcount_names()
-    mealPlannedToday = get_meal_planned_today()
+    groupName, members = get_group_name_and_members_from_keycloak()
+    mealcountNames = get_mealcount_names(members)
+    mealPlannedToday = get_meal_planned_today(groupName)
 
     now = datetime.datetime.now().astimezone()
     midnight = (
