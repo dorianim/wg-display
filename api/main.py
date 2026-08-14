@@ -27,7 +27,6 @@ TOBIS_KOCHBUCH_URL = os.environ.get("TOBIS_KOCHBUCH_URL", None)
 
 SHOPPING_LIST_URL = os.environ.get("SHOPPING_LIST_URL", None)
 SHOPPING_LIST_TOKEN = os.environ.get("SHOPPING_LIST_TOKEN", None)
-SHOPPING_LIST_GROUP = os.environ.get("SHOPPING_LIST_GROUP", None)
 
 KEYCLOAK_BASE_URL = os.environ.get("KEYCLOAK_BASE_URL", None)
 KEYCLOAK_REALM = os.environ.get("KEYCLOAK_REALM", None)
@@ -70,7 +69,7 @@ locale.setlocale(locale.LC_TIME, "de_DE.UTF-8")
 
 @app.get("/")
 def read_root():
-    return "WG-API v1.0.0"
+    return "WG-API v1.1.0"
 
 
 @app.get("/mealcount")
@@ -93,7 +92,8 @@ def get_mealcount_names_google_sheets() -> Tuple[str, str, str, str]:
 
 
 def get_mealcount_names() -> Tuple[str, str, str, str]:
-    members_tuple = get_group_members_in_tuple()
+    _, members = get_group_name_and_members_from_keycloak()
+    members_tuple = get_group_members_in_tuple(members)
     return (
         members_tuple[0][1],
         members_tuple[1][1],
@@ -102,11 +102,10 @@ def get_mealcount_names() -> Tuple[str, str, str, str]:
     )
 
 
-def get_group_members_in_tuple() -> (
-    Tuple[Tuple[str, str], Tuple[str, str], Tuple[str, str], Tuple[str, str]]
-):
+def get_group_members_in_tuple(
+    members: List[Tuple[str, str, int]],
+) -> Tuple[Tuple[str, str], Tuple[str, str], Tuple[str, str], Tuple[str, str]]:
     members_tuple = [("", ""), ("", ""), ("", ""), ("", "")]
-    members = get_group_members_from_keycloak()
     for member in members:
         username, first_name, display_index = member
         if display_index < 0 or display_index > 3:
@@ -116,7 +115,9 @@ def get_group_members_in_tuple() -> (
     return tuple(members_tuple)
 
 
-def get_group_members_from_keycloak() -> List[Tuple[str, str, int]]:
+def get_group_name_and_members_from_keycloak() -> (
+    Tuple[str, List[Tuple[str, str, int]]]
+):
     # Get a short-lived access token using the static client secret
     token_response = requests.post(
         f"{KEYCLOAK_BASE_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/token",
@@ -131,18 +132,27 @@ def get_group_members_from_keycloak() -> List[Tuple[str, str, int]]:
 
     access_token = token_response.json()["access_token"]
 
+    # Fetch name of the group
+    group_response = requests.get(
+        f"{KEYCLOAK_BASE_URL}/admin/realms/{KEYCLOAK_REALM}/groups/{KEYCLOAK_GROUP_ID}",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=10,
+    )
+    group_response.raise_for_status()
+    group_name = group_response.json().get("name")
+
     # Fetch members of the permitted group
-    response = requests.get(
+    members_response = requests.get(
         f"{KEYCLOAK_BASE_URL}/admin/realms/{KEYCLOAK_REALM}/groups/{KEYCLOAK_GROUP_ID}/members",
         headers={
             "Authorization": f"Bearer {access_token}",
         },
         timeout=10,
     )
-    response.raise_for_status()
+    members_response.raise_for_status()
 
     members = []
-    for member in response.json():
+    for member in members_response.json():
         if (
             not member.get("attributes")
             or not member["attributes"].get("wg-display-index")
@@ -158,7 +168,7 @@ def get_group_members_from_keycloak() -> List[Tuple[str, str, int]]:
             )
         )
 
-    return members
+    return (group_name, members)
 
 
 @app.get("/mealcount/names")
@@ -175,13 +185,14 @@ def read_mealcount_names(
 def update_mealcount(
     to_insert: Tuple[int, int, int, int], _: Annotated[str, Depends(tokenScheme)]
 ):
-    print("Request: ", to_insert)
-
     if len(to_insert) != 4 or any(not isinstance(x, int) for x in to_insert):
         raise HTTPException(status_code=400, detail="Invalid request")
 
     google_sheets_names = get_mealcount_names_google_sheets()
-    keycloak_group_members = get_group_members_in_tuple()
+    keycloak_group_name, keycloak_group_members_list = (
+        get_group_name_and_members_from_keycloak()
+    )
+    keycloak_group_members = get_group_members_in_tuple(keycloak_group_members_list)
 
     for keycloak_member, google_sheets_name in zip(
         keycloak_group_members, google_sheets_names
@@ -193,7 +204,9 @@ def update_mealcount(
             )
 
     push_mealcount_to_google_sheets(to_insert)
-    push_mealcount_to_shopping_list(to_insert, keycloak_group_members)
+    push_mealcount_to_shopping_list(
+        to_insert, keycloak_group_name, keycloak_group_members
+    )
 
 
 def push_mealcount_to_google_sheets(to_insert: Tuple[int, int, int, int]):
@@ -210,6 +223,7 @@ def push_mealcount_to_google_sheets(to_insert: Tuple[int, int, int, int]):
 
 def push_mealcount_to_shopping_list(
     counts: Tuple[int, int, int, int],
+    keycloak_group_name: str,
     keycloak_group_members: Tuple[
         Tuple[str, str], Tuple[str, str], Tuple[str, str], Tuple[str, str]
     ],
@@ -223,8 +237,7 @@ def push_mealcount_to_shopping_list(
             for member, count in zip(keycloak_group_members, counts)
         ]
     }
-    if SHOPPING_LIST_GROUP is not None:
-        body["group"] = SHOPPING_LIST_GROUP
+    body["group"] = keycloak_group_name
 
     try:
         response = requests.post(
