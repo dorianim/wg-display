@@ -56,7 +56,7 @@ bool postCounts(int counts[4]) {
 }
 
 bool getMotd(String events[MAX_EVENT_COUNT], String mealcountNames[4], String &mealPlannedToday, uint64_t &secondsUntilMidnight,
-             uint8_t &day, uint8_t &month, String &dayString) {
+             int64_t &timestamp, uint8_t &day, uint8_t &month, String &dayString) {
   if (!isOnline())
     return false;
 
@@ -100,6 +100,7 @@ bool getMotd(String events[MAX_EVENT_COUNT], String mealcountNames[4], String &m
 
   mealPlannedToday = doc["mealPlannedToday"].isNull() ? "" : doc["mealPlannedToday"].as<String>();
   secondsUntilMidnight = doc["secondsUntilMidnight"].as<uint64_t>();
+  timestamp = doc["timestamp"] | (int64_t)0; // 0 if the api does not send it
   day = doc["day"].as<uint8_t>();
   month = doc["month"].as<uint8_t>();
   dayString = doc["dayString"].as<String>();

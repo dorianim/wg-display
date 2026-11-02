@@ -4,6 +4,8 @@
 #include <FreeMonoBold18pt8b.h>
 #include <FreeMonoBold9pt8b.h>
 #include <WiFi.h>
+#include <sys/time.h>
+#include <time.h>
 
 #include "../config.h"
 
@@ -27,6 +29,9 @@ int counts_today[4] = {0};
 
 // number of times the sync failed
 uint8_t syncRetryCount;
+
+// unix time at which the current day ends, counts_today are reset after that
+int64_t todayEndsAt;
 
 TaskHandle_t displayUpdateTaskHandle = nullptr;
 
@@ -228,6 +233,31 @@ void showSyncIcon(bool slash)
   display.nextPage();
 }
 
+// the RTC keeps running in deep sleep, but starts at 1970 after a power loss
+bool clockIsSet() { return time(nullptr) > 1700000000; }
+
+void resetTodayCountsIfDayIsOver()
+{
+  if (!clockIsSet() || time(nullptr) < todayEndsAt)
+    return;
+
+  Serial.println("New day, resetting todays counts");
+  for (int i = 0; i < 4; i++)
+    counts_today[i] = 0;
+}
+
+void setClock(int64_t timestamp, uint64_t secondsUntilMidnight)
+{
+  timeval now = {.tv_sec = (time_t)timestamp, .tv_usec = 0};
+  settimeofday(&now, nullptr);
+
+  // the clock may have drifted or been unset, check again with the correct time
+  resetTodayCountsIfDayIsOver();
+
+  // secondsUntilMidnight counts to 23:59:59
+  todayEndsAt = timestamp + secondsUntilMidnight + 1;
+}
+
 bool runSync(uint64_t &resyncInSeconds)
 {
   resyncInSeconds = 60;
@@ -242,12 +272,17 @@ bool runSync(uint64_t &resyncInSeconds)
   // get motd
   String events[5],mealcountNames[4], mealPlannedToday, dayString;
   uint8_t day, month;
+  int64_t timestamp;
 
-  ok = apiHelper::getMotd(events, mealcountNames, mealPlannedToday, resyncInSeconds, day, month, dayString);
+  ok = apiHelper::getMotd(events, mealcountNames, mealPlannedToday, resyncInSeconds, timestamp, day, month, dayString);
   if (!ok)
   {
     return false;
   }
+
+  if (timestamp > 0)
+    setClock(timestamp, resyncInSeconds);
+
   resyncInSeconds += 60;
 
   writeNamesToEeprom(mealcountNames);
@@ -294,6 +329,7 @@ void goSleep()
   EEPROM.put(0, counts);
   EEPROM.put(sizeof(counts) + sizeof(names), syncRetryCount);
   EEPROM.put(sizeof(counts) + sizeof(names) + sizeof(syncRetryCount), counts_today);
+  EEPROM.put(sizeof(counts) + sizeof(names) + sizeof(syncRetryCount) + sizeof(counts_today), todayEndsAt);
   EEPROM.commit();
 
   display.hibernate();
@@ -356,9 +392,12 @@ void setup()
   // 4*char[10] (names)
   // 1*uint8_t (retry count)
   // 4*int (todays counts)
+  // 1*int64_t (end of the current day as unix time)
+
+  const int eepromSize = sizeof(counts) + sizeof(names) + sizeof(syncRetryCount) + sizeof(counts_today) + sizeof(todayEndsAt);
 
   // begin eeprom
-  EEPROM.begin(sizeof(counts) + sizeof(names) + sizeof(syncRetryCount) + sizeof(counts_today));
+  EEPROM.begin(eepromSize);
 
   // read counts from eeprom
   EEPROM.get(0, counts);
@@ -372,9 +411,12 @@ void setup()
   // read todays counts from eeprom
   EEPROM.get(sizeof(counts) + sizeof(names) + sizeof(syncRetryCount), counts_today);
 
+  // read end of the current day from eeprom
+  EEPROM.get(sizeof(counts) + sizeof(names) + sizeof(syncRetryCount) + sizeof(counts_today), todayEndsAt);
+
   // dump eeprom as hex
   Serial.println("EEPROM:");
-  for (int i = 0; i < sizeof(counts) + sizeof(names) + sizeof(syncRetryCount) + sizeof(counts_today); i++)
+  for (int i = 0; i < eepromSize; i++)
   {
     Serial.print(EEPROM.read(i), HEX);
     Serial.print(" ");
@@ -387,16 +429,11 @@ void setup()
   display.setRotation(1);
   display.setTextColor(GxEPD_BLACK);
 
+  resetTodayCountsIfDayIsOver();
+
   if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER)
   {
     Serial.println("Woke up from timer, sync retry count: " + String(syncRetryCount));
-
-    // only reset if syncRetryCount is 0, because otherwise this may not be a midnight wakeup
-    // but a retry wakeup, and we dont want to reset the counts in that case
-    if (syncRetryCount == 0)
-      for (int i = 0; i < 4; i++)
-        counts_today[i] = 0;
-
     goSleep();
   }
 

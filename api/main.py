@@ -311,6 +311,7 @@ class EventsResponse(BaseModel):
     mealcountNames: Tuple[str, str, str, str]
     mealPlannedToday: str | None
     secondsUntilMidnight: int
+    timestamp: int
     day: int
     month: int
     dayString: str
@@ -378,6 +379,7 @@ def message_of_the_day(_: Annotated[str, Depends(tokenScheme)]) -> EventsRespons
         "month": now.month,
         "dayString": now.strftime("%A"),
         "secondsUntilMidnight": secondsUntilMidnight,
+        "timestamp": int(now.timestamp()),
     }
 
 
