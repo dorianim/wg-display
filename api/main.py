@@ -311,7 +311,6 @@ class EventsResponse(BaseModel):
     mealcountNames: Tuple[str, str, str, str]
     mealPlannedToday: str | None
     secondsUntilMidnight: int
-    timestamp: int
     day: int
     month: int
     dayString: str
@@ -366,13 +365,10 @@ def message_of_the_day(_: Annotated[str, Depends(tokenScheme)]) -> EventsRespons
     mealPlannedToday = get_meal_planned_today(groupName)
 
     now = datetime.datetime.now().astimezone()
-    # naive local midnight -> astimezone() applies the DST offset valid at midnight
-    nextMidnight = datetime.datetime.combine(
-        now.date() + datetime.timedelta(days=1), datetime.time()
-    ).astimezone()
-    timestamp = int(now.timestamp())
-    # counts to 23:59:59, like before
-    secondsUntilMidnight = int(nextMidnight.timestamp()) - timestamp - 1
+    midnight = (
+        datetime.datetime.now().astimezone().replace(hour=23, minute=59, second=59)
+    )
+    secondsUntilMidnight = (midnight - now).seconds
 
     return {
         "events": eventNames,
@@ -382,7 +378,6 @@ def message_of_the_day(_: Annotated[str, Depends(tokenScheme)]) -> EventsRespons
         "month": now.month,
         "dayString": now.strftime("%A"),
         "secondsUntilMidnight": secondsUntilMidnight,
-        "timestamp": timestamp,
     }
 
 

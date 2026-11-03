@@ -30,9 +30,6 @@ int counts_today[4] = {0};
 // number of times the sync failed
 uint8_t syncRetryCount;
 
-// unix time at which the current day ends, counts_today are reset after that
-int64_t todayEndsAt;
-
 TaskHandle_t displayUpdateTaskHandle = nullptr;
 
 #define FONT_9PT FreeMono_Bold9pt8b
@@ -233,10 +230,18 @@ void showSyncIcon(bool slash)
   display.nextPage();
 }
 
+// The RTC keeps running in deep sleep. It is set so that midnight is always at
+// this fixed time (2000-01-01 00:00 UTC), so no absolute time is needed.
+// After a power loss it starts at 0, far before MIDNIGHT. Then nothing is reset
+// before the next midnight, so the counts may be stale for one day.
+#define MIDNIGHT 946684800
 #define SECONDS_PER_DAY 86400
 
-// the RTC keeps running in deep sleep, but starts at 1970 after a power loss
-bool clockIsSet() { return time(nullptr) > 1700000000; }
+void setClock(int64_t seconds)
+{
+  timeval tv = {.tv_sec = (time_t)seconds, .tv_usec = 0};
+  settimeofday(&tv, nullptr);
+}
 
 void resetTodayCounts()
 {
@@ -245,42 +250,29 @@ void resetTodayCounts()
     counts_today[i] = 0;
 }
 
-// checks the RTC against todayEndsAt, works without a connection to the api
 void resetTodayCountsIfDayIsOver()
 {
-  if (!clockIsSet())
-    return;
-
   int64_t now = time(nullptr);
-  if (now < todayEndsAt)
+  if (now < MIDNIGHT)
     return;
 
   resetTodayCounts();
 
-  // move todayEndsAt to the end of the new day, so that this day is not reset
-  // again before the next successful sync. Days are assumed to be 24h long here,
-  // the next sync corrects this on DST changes. Unsigned math cannot overflow,
-  // even if todayEndsAt is garbage. The result is in (now, now + 24h].
-  uint64_t secondsSinceDayEnded = (uint64_t)now - (uint64_t)todayEndsAt;
-  todayEndsAt = now + SECONDS_PER_DAY - (int64_t)(secondsSinceDayEnded % SECONDS_PER_DAY);
+  // go back by whole days, so that the next midnight is at MIDNIGHT again
+  setClock(now - ((now - MIDNIGHT) / SECONDS_PER_DAY + 1) * SECONDS_PER_DAY);
 }
 
-void setClock(int64_t timestamp, uint64_t secondsUntilMidnight)
+void syncClock(uint64_t secondsUntilMidnight)
 {
-  timeval now = {.tv_sec = (time_t)timestamp, .tv_usec = 0};
-  settimeofday(&now, nullptr);
-
-  // secondsUntilMidnight counts to 23:59:59
-  int64_t serverTodayEndsAt = timestamp + (int64_t)secondsUntilMidnight + 1;
-
-  // counts_today belong to the day ending at todayEndsAt. If that is an earlier
-  // day than the server's, a midnight has passed that the RTC did not notice
-  // (drift, power loss). Days are 23h-25h long and todayEndsAt is at most 1h
-  // off, so half a day is a safe threshold between "same day" and "earlier day".
-  if (todayEndsAt < serverTodayEndsAt - SECONDS_PER_DAY / 2)
+  // if the RTC is slow, it may not have noticed that a midnight passed. Then it
+  // thinks the day ends much earlier than the server does. Days are 23h-25h
+  // long, so half a day separates "same day" from "missed midnight".
+  int64_t rtcSecondsUntilMidnight = MIDNIGHT - (int64_t)time(nullptr);
+  if (rtcSecondsUntilMidnight < (int64_t)secondsUntilMidnight - SECONDS_PER_DAY / 2)
     resetTodayCounts();
 
-  todayEndsAt = serverTodayEndsAt;
+  // secondsUntilMidnight counts to 23:59:59
+  setClock(MIDNIGHT - (int64_t)secondsUntilMidnight - 1);
 }
 
 bool runSync(uint64_t &resyncInSeconds)
@@ -297,17 +289,14 @@ bool runSync(uint64_t &resyncInSeconds)
   // get motd
   String events[5],mealcountNames[4], mealPlannedToday, dayString;
   uint8_t day, month;
-  int64_t timestamp;
 
-  ok = apiHelper::getMotd(events, mealcountNames, mealPlannedToday, resyncInSeconds, timestamp, day, month, dayString);
+  ok = apiHelper::getMotd(events, mealcountNames, mealPlannedToday, resyncInSeconds, day, month, dayString);
   if (!ok)
   {
     return false;
   }
 
-  if (timestamp > 0)
-    setClock(timestamp, resyncInSeconds);
-
+  syncClock(resyncInSeconds);
   resyncInSeconds += 60;
 
   writeNamesToEeprom(mealcountNames);
@@ -354,7 +343,6 @@ void goSleep()
   EEPROM.put(0, counts);
   EEPROM.put(sizeof(counts) + sizeof(names), syncRetryCount);
   EEPROM.put(sizeof(counts) + sizeof(names) + sizeof(syncRetryCount), counts_today);
-  EEPROM.put(sizeof(counts) + sizeof(names) + sizeof(syncRetryCount) + sizeof(counts_today), todayEndsAt);
   EEPROM.commit();
 
   display.hibernate();
@@ -417,12 +405,9 @@ void setup()
   // 4*char[10] (names)
   // 1*uint8_t (retry count)
   // 4*int (todays counts)
-  // 1*int64_t (end of the current day as unix time)
-
-  const int eepromSize = sizeof(counts) + sizeof(names) + sizeof(syncRetryCount) + sizeof(counts_today) + sizeof(todayEndsAt);
 
   // begin eeprom
-  EEPROM.begin(eepromSize);
+  EEPROM.begin(sizeof(counts) + sizeof(names) + sizeof(syncRetryCount) + sizeof(counts_today));
 
   // read counts from eeprom
   EEPROM.get(0, counts);
@@ -436,12 +421,9 @@ void setup()
   // read todays counts from eeprom
   EEPROM.get(sizeof(counts) + sizeof(names) + sizeof(syncRetryCount), counts_today);
 
-  // read end of the current day from eeprom
-  EEPROM.get(sizeof(counts) + sizeof(names) + sizeof(syncRetryCount) + sizeof(counts_today), todayEndsAt);
-
   // dump eeprom as hex
   Serial.println("EEPROM:");
-  for (int i = 0; i < eepromSize; i++)
+  for (int i = 0; i < sizeof(counts) + sizeof(names) + sizeof(syncRetryCount) + sizeof(counts_today); i++)
   {
     Serial.print(EEPROM.read(i), HEX);
     Serial.print(" ");
