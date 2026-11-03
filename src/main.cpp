@@ -4,6 +4,8 @@
 #include <FreeMonoBold18pt8b.h>
 #include <FreeMonoBold9pt8b.h>
 #include <WiFi.h>
+#include <sys/time.h>
+#include <time.h>
 
 #include "../config.h"
 
@@ -228,6 +230,51 @@ void showSyncIcon(bool slash)
   display.nextPage();
 }
 
+// The RTC keeps running in deep sleep. It is set so that midnight is always at
+// this fixed time (2000-01-01 00:00 UTC), so no absolute time is needed.
+// After a power loss it starts at 0, far before MIDNIGHT. Then nothing is reset
+// before the next midnight, so the counts may be stale for one day.
+#define MIDNIGHT 946684800
+#define SECONDS_PER_DAY 86400
+
+void setClock(int64_t seconds)
+{
+  timeval tv = {.tv_sec = (time_t)seconds, .tv_usec = 0};
+  settimeofday(&tv, nullptr);
+}
+
+void resetTodayCounts()
+{
+  Serial.println("New day, resetting todays counts");
+  for (int i = 0; i < 4; i++)
+    counts_today[i] = 0;
+}
+
+void resetTodayCountsIfDayIsOver()
+{
+  int64_t now = time(nullptr);
+  if (now < MIDNIGHT)
+    return;
+
+  resetTodayCounts();
+
+  // go back by whole days, so that the next midnight is at MIDNIGHT again
+  setClock(now - ((now - MIDNIGHT) / SECONDS_PER_DAY + 1) * SECONDS_PER_DAY);
+}
+
+void syncClock(uint64_t secondsUntilMidnight)
+{
+  // if the RTC is slow, it may not have noticed that a midnight passed. Then it
+  // thinks the day ends much earlier than the server does. Days are 23h-25h
+  // long, so half a day separates "same day" from "missed midnight".
+  int64_t rtcSecondsUntilMidnight = MIDNIGHT - (int64_t)time(nullptr);
+  if (rtcSecondsUntilMidnight < (int64_t)secondsUntilMidnight - SECONDS_PER_DAY / 2)
+    resetTodayCounts();
+
+  // secondsUntilMidnight counts to 23:59:59
+  setClock(MIDNIGHT - (int64_t)secondsUntilMidnight - 1);
+}
+
 bool runSync(uint64_t &resyncInSeconds)
 {
   resyncInSeconds = 60;
@@ -248,6 +295,8 @@ bool runSync(uint64_t &resyncInSeconds)
   {
     return false;
   }
+
+  syncClock(resyncInSeconds);
   resyncInSeconds += 60;
 
   writeNamesToEeprom(mealcountNames);
@@ -387,16 +436,11 @@ void setup()
   display.setRotation(1);
   display.setTextColor(GxEPD_BLACK);
 
+  resetTodayCountsIfDayIsOver();
+
   if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER)
   {
     Serial.println("Woke up from timer, sync retry count: " + String(syncRetryCount));
-
-    // only reset if syncRetryCount is 0, because otherwise this may not be a midnight wakeup
-    // but a retry wakeup, and we dont want to reset the counts in that case
-    if (syncRetryCount == 0)
-      for (int i = 0; i < 4; i++)
-        counts_today[i] = 0;
-
     goSleep();
   }
 
