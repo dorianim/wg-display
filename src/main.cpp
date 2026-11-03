@@ -233,17 +233,36 @@ void showSyncIcon(bool slash)
   display.nextPage();
 }
 
+#define SECONDS_PER_DAY 86400
+
 // the RTC keeps running in deep sleep, but starts at 1970 after a power loss
 bool clockIsSet() { return time(nullptr) > 1700000000; }
 
-void resetTodayCountsIfDayIsOver()
+void resetTodayCounts()
 {
-  if (!clockIsSet() || time(nullptr) < todayEndsAt)
-    return;
-
   Serial.println("New day, resetting todays counts");
   for (int i = 0; i < 4; i++)
     counts_today[i] = 0;
+}
+
+// checks the RTC against todayEndsAt, works without a connection to the api
+void resetTodayCountsIfDayIsOver()
+{
+  if (!clockIsSet())
+    return;
+
+  int64_t now = time(nullptr);
+  if (now < todayEndsAt)
+    return;
+
+  resetTodayCounts();
+
+  // move todayEndsAt to the end of the new day, so that this day is not reset
+  // again before the next successful sync. Days are assumed to be 24h long here,
+  // the next sync corrects this on DST changes. Unsigned math cannot overflow,
+  // even if todayEndsAt is garbage. The result is in (now, now + 24h].
+  uint64_t secondsSinceDayEnded = (uint64_t)now - (uint64_t)todayEndsAt;
+  todayEndsAt = now + SECONDS_PER_DAY - (int64_t)(secondsSinceDayEnded % SECONDS_PER_DAY);
 }
 
 void setClock(int64_t timestamp, uint64_t secondsUntilMidnight)
@@ -251,11 +270,17 @@ void setClock(int64_t timestamp, uint64_t secondsUntilMidnight)
   timeval now = {.tv_sec = (time_t)timestamp, .tv_usec = 0};
   settimeofday(&now, nullptr);
 
-  // the clock may have drifted or been unset, check again with the correct time
-  resetTodayCountsIfDayIsOver();
-
   // secondsUntilMidnight counts to 23:59:59
-  todayEndsAt = timestamp + secondsUntilMidnight + 1;
+  int64_t serverTodayEndsAt = timestamp + (int64_t)secondsUntilMidnight + 1;
+
+  // counts_today belong to the day ending at todayEndsAt. If that is an earlier
+  // day than the server's, a midnight has passed that the RTC did not notice
+  // (drift, power loss). Days are 23h-25h long and todayEndsAt is at most 1h
+  // off, so half a day is a safe threshold between "same day" and "earlier day".
+  if (todayEndsAt < serverTodayEndsAt - SECONDS_PER_DAY / 2)
+    resetTodayCounts();
+
+  todayEndsAt = serverTodayEndsAt;
 }
 
 bool runSync(uint64_t &resyncInSeconds)
